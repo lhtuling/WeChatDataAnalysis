@@ -603,6 +603,9 @@ if (kind === 'date') {
 if (kind === 'first') {
   return '已定位到会话顶部（上下文模式）'
 }
+if (kind === 'monitor') {
+  return '已定位到关键词监控记录（上下文模式）'
+}
 return '已定位到搜索结果（上下文模式）'
 })
 

@@ -424,6 +424,40 @@ const searchState = useChatSearch({
   loadMoreMessages
 })
 
+let lastMonitorAnchorKey = ''
+const queryStringValue = (value) => {
+  if (Array.isArray(value)) return String(value[0] || '').trim()
+  return String(value || '').trim()
+}
+
+const handleMonitorAnchorQuery = async () => {
+  if (!process.client) return
+  const account = String(selectedAccount.value || '').trim()
+  const targetUsername = String(routeUsername.value || selectedContact.value?.username || '').trim()
+  const anchorId = queryStringValue(route.query.anchor_id)
+  const hitId = queryStringValue(route.query.monitor_hit)
+  if (!account || !targetUsername || !anchorId || !hitId) return
+
+  const key = `${account}|${targetUsername}|${anchorId}|${hitId}`
+  if (key === lastMonitorAnchorKey) return
+  lastMonitorAnchorKey = key
+
+  await waitForNextPaint()
+  await searchState.locateByAnchorId({
+    targetUsername,
+    anchorId,
+    kind: 'monitor',
+    label: '关键词监控'
+  })
+
+  const numericHitId = Number(hitId || 0)
+  if (Number.isFinite(numericHitId) && numericHitId > 0) {
+    try {
+      await api.markKeywordMonitorHitsRead({ account, hitIds: [numericHitId] })
+    } catch {}
+  }
+}
+
 exitSearchContext = searchState.exitSearchContext
 
 let locateServerIdTimer = null
@@ -780,6 +814,20 @@ watch(
       reason: 'route-watch'
     })
   }
+)
+
+watch(
+  [
+    selectedAccount,
+    routeUsername,
+    () => selectedContact.value?.username,
+    () => route.query.anchor_id,
+    () => route.query.monitor_hit,
+  ],
+  () => {
+    void handleMonitorAnchorQuery()
+  },
+  { immediate: true }
 )
 
 const chatState = {

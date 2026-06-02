@@ -195,6 +195,37 @@
         </div>
       </div>
 
+      <!-- Keyword Monitor -->
+      <div
+        class="sidebar-rail-action w-full h-[var(--sidebar-rail-step)] flex items-center justify-center cursor-pointer group"
+        :title="keywordMonitorTitle"
+        @click="goKeywordMonitorSettings"
+      >
+        <div class="sidebar-rail-plate relative w-[var(--sidebar-rail-btn)] h-[var(--sidebar-rail-btn)] rounded-md flex items-center justify-center transition-colors bg-transparent">
+          <svg
+            class="sidebar-rail-icon w-[var(--sidebar-rail-icon)] h-[var(--sidebar-rail-icon)]"
+            :class="{ 'sidebar-rail-icon-active': keywordMonitorEnabled || keywordMonitorUnread > 0 }"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="1.7"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            aria-hidden="true"
+          >
+            <circle cx="11" cy="11" r="6" />
+            <path d="M16 16l4 4" />
+            <path d="M11 8v3l2 2" />
+          </svg>
+          <span
+            v-if="keywordMonitorUnread > 0"
+            class="absolute -right-1 -top-1 min-w-[16px] rounded-full bg-[#ff4d4f] px-1 text-center text-[10px] font-semibold leading-[16px] text-white shadow-sm"
+          >
+            {{ keywordMonitorBadgeText }}
+          </span>
+        </div>
+      </div>
+
       <!-- ImgHelper (Auto download large images) -->
       <div
         class="sidebar-rail-action w-full h-[var(--sidebar-rail-step)] flex items-center justify-center group"
@@ -417,7 +448,7 @@ const imgHelperStore = useImgHelperStore()
 const { enabled: imgHelperEnabled, checking: imgHelperChecking, toggling: imgHelperToggling, error: imgHelperError } = storeToRefs(imgHelperStore)
 
 const { open: settingsDialogOpen, openDialog: openSettingsDialog } = useSettingsDialog()
-const { getChatAccountInfo, deleteChatAccount } = useApi()
+const { getChatAccountInfo, deleteChatAccount, getKeywordMonitorSummary } = useApi()
 
 const showGlobalExportEntry = true
 const accountDialogOpen = ref(false)
@@ -429,6 +460,22 @@ const accountDeleteLoading = ref(false)
 const accountDeleteError = ref('')
 const accountInfoApiUnsupported = ref(false)
 const deleteAccountApiUnsupported = ref(false)
+const keywordMonitorEnabled = ref(false)
+const keywordMonitorUnread = ref(0)
+const keywordMonitorSummaryLoading = ref(false)
+let keywordMonitorSummaryTimer = null
+
+const keywordMonitorBadgeText = computed(() => {
+  const n = Number(keywordMonitorUnread.value || 0)
+  if (n > 99) return '99+'
+  return String(Math.max(0, n))
+})
+
+const keywordMonitorTitle = computed(() => {
+  const unread = Number(keywordMonitorUnread.value || 0)
+  if (unread > 0) return `关键词监控：${unread} 条未读`
+  return keywordMonitorEnabled.value ? '关键词监控' : '关键词监控设置'
+})
 
 const sessionUpdatedAtText = computed(() => {
   const ts = Number(accountInfo.value?.session_updated_at || 0)
@@ -536,21 +583,58 @@ const closeExportDialog = () => {
   exportDialogOpen.value = false
 }
 
+const refreshKeywordMonitorSummary = async () => {
+  const account = String(selectedAccount.value || '').trim()
+  if (!account || keywordMonitorSummaryLoading.value) {
+    if (!account) {
+      keywordMonitorEnabled.value = false
+      keywordMonitorUnread.value = 0
+    }
+    return
+  }
+  keywordMonitorSummaryLoading.value = true
+  try {
+    const res = await getKeywordMonitorSummary({ account })
+    keywordMonitorEnabled.value = !!res?.enabled
+    keywordMonitorUnread.value = Math.max(0, Number(res?.unread || 0))
+  } catch {
+    keywordMonitorEnabled.value = false
+    keywordMonitorUnread.value = 0
+  } finally {
+    keywordMonitorSummaryLoading.value = false
+  }
+}
+
 watch(selectedAccount, () => {
-  if (!accountDialogOpen.value) return
-  void loadAccountInfo()
+  if (accountDialogOpen.value) {
+    void loadAccountInfo()
+  }
+  void refreshKeywordMonitorSummary()
+})
+
+watch(settingsDialogOpen, (isOpen) => {
+  if (isOpen) return
+  void refreshKeywordMonitorSummary()
 })
 
 onMounted(async () => {
   await chatAccounts.ensureLoaded()
+  await refreshKeywordMonitorSummary()
   if (process.client && typeof window !== 'undefined') {
     window.addEventListener('keydown', onWindowKeydown)
+    keywordMonitorSummaryTimer = window.setInterval(() => {
+      void refreshKeywordMonitorSummary()
+    }, 10_000)
   }
 })
 
 onBeforeUnmount(() => {
   if (!process.client || typeof window === 'undefined') return
   window.removeEventListener('keydown', onWindowKeydown)
+  if (keywordMonitorSummaryTimer) {
+    window.clearInterval(keywordMonitorSummaryTimer)
+    keywordMonitorSummaryTimer = null
+  }
 })
 
 const apiBase = useApiBase()
@@ -576,6 +660,7 @@ const goBiz = async () => { await navigateTo('/biz') }
 const goWrapped = async () => { await navigateTo('/wrapped') }
 const goGuide = async () => { await navigateTo('/') }
 const goSettings = () => { openSettingsDialog() }
+const goKeywordMonitorSettings = () => { openSettingsDialog('keywordMonitor') }
 
 const onWindowKeydown = (event) => {
   if (event?.key !== 'Escape') return

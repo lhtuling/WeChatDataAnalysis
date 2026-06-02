@@ -313,6 +313,57 @@ export const useApi = () => {
     return await request(url)
   }
 
+  const getKeywordMonitorSettings = async (params = {}) => {
+    const query = new URLSearchParams()
+    if (params && params.account) query.set('account', params.account)
+    const url = '/keyword-monitor/settings' + (query.toString() ? `?${query.toString()}` : '')
+    return await request(url)
+  }
+
+  const saveKeywordMonitorSettings = async (payload = {}) => {
+    return await request('/keyword-monitor/settings', {
+      method: 'PUT',
+      body: payload
+    })
+  }
+
+  const listKeywordMonitorGroups = async (params = {}) => {
+    const query = new URLSearchParams()
+    if (params && params.account) query.set('account', params.account)
+    const url = '/keyword-monitor/groups' + (query.toString() ? `?${query.toString()}` : '')
+    return await request(url)
+  }
+
+  const listKeywordMonitorHits = async (params = {}) => {
+    const query = new URLSearchParams()
+    if (params && params.account) query.set('account', params.account)
+    if (params && params.limit != null) query.set('limit', String(params.limit))
+    if (params && params.offset != null) query.set('offset', String(params.offset))
+    const url = '/keyword-monitor/hits' + (query.toString() ? `?${query.toString()}` : '')
+    return await request(url)
+  }
+
+  const getKeywordMonitorSummary = async (params = {}) => {
+    const query = new URLSearchParams()
+    if (params && params.account) query.set('account', params.account)
+    const url = '/keyword-monitor/summary' + (query.toString() ? `?${query.toString()}` : '')
+    return await request(url)
+  }
+
+  const markKeywordMonitorHitsRead = async (payload = {}) => {
+    return await request('/keyword-monitor/hits/read', {
+      method: 'POST',
+      body: payload
+    })
+  }
+
+  const processKeywordMonitor = async (params = {}) => {
+    const query = new URLSearchParams()
+    if (params && params.account) query.set('account', params.account)
+    const url = '/keyword-monitor/process' + (query.toString() ? `?${query.toString()}` : '')
+    return await request(url, { method: 'POST' })
+  }
+
   // 解析嵌套合并转发聊天记录（通过 server_id）
   const resolveNestedChatHistory = async (params = {}) => {
     const query = new URLSearchParams()
@@ -681,6 +732,13 @@ export const useApi = () => {
     getChatMessagesAround,
     getChatMessageDailyCounts,
     getChatMessageAnchor,
+    getKeywordMonitorSettings,
+    saveKeywordMonitorSettings,
+    listKeywordMonitorGroups,
+    listKeywordMonitorHits,
+    getKeywordMonitorSummary,
+    markKeywordMonitorHitsRead,
+    processKeywordMonitor,
     resolveNestedChatHistory,
     resolveAppMsg,
     listSnsTimeline,

@@ -72,6 +72,7 @@ from .. import chat_edit_store
 from ..app_paths import get_output_dir
 from ..database_filters import list_countable_database_names
 from ..key_store import remove_account_keys_from_store
+from ..keyword_monitor import delete_account_monitor_data, process_account as process_keyword_monitor_account
 from ..path_fix import PathFixRoute
 from ..perf_trace import create_perf_trace
 from ..session_last_message import (
@@ -1990,6 +1991,17 @@ def sync_chat_realtime_messages(
                 int(backfilled),
                 int(max_local_id),
             )
+            keyword_monitor_result: dict[str, Any] = {}
+            if inserted > 0:
+                try:
+                    keyword_monitor_result = process_keyword_monitor_account(account_dir)
+                except Exception:
+                    logger.exception(
+                        "[%s] keyword monitor process failed account=%s username=%s",
+                        trace_id,
+                        account_dir.name,
+                        username,
+                    )
             return {
                 "status": "success",
                 "account": account_dir.name,
@@ -1999,6 +2011,7 @@ def sync_chat_realtime_messages(
                 "inserted": int(inserted),
                 "backfilled": int(backfilled),
                 "preview": preview or "",
+                "keywordMonitor": keyword_monitor_result,
             }
         finally:
             msg_conn.close()
@@ -2633,6 +2646,16 @@ def sync_chat_realtime_messages_all(
             int(elapsed_ms),
             len(errors),
         )
+        keyword_monitor_result: dict[str, Any] = {}
+        if inserted_total > 0:
+            try:
+                keyword_monitor_result = process_keyword_monitor_account(account_dir)
+            except Exception:
+                logger.exception(
+                    "[%s] keyword monitor process failed account=%s",
+                    trace_id,
+                    account_dir.name,
+                )
         return {
             "status": "success",
             "account": account_dir.name,
@@ -2648,6 +2671,7 @@ def sync_chat_realtime_messages_all(
             "insertedTotal": int(inserted_total),
             "elapsedMs": int(elapsed_ms),
             "errors": errors,
+            "keywordMonitor": keyword_monitor_result,
         }
 
 def _normalize_session_type(value: Optional[str]) -> Optional[str]:
@@ -3956,6 +3980,12 @@ def delete_chat_account(account: str):
     except Exception:
         removed_key_cache = False
 
+    removed_monitor_count = 0
+    try:
+        removed_monitor_count = int(delete_account_monitor_data(account_name) or 0)
+    except Exception:
+        removed_monitor_count = 0
+
     output_dir = get_output_dir()
     exports_dir = output_dir / "exports" / account_name
     if exports_dir.exists():
@@ -3978,6 +4008,7 @@ def delete_chat_account(account: str):
         "default_account": accounts[0] if accounts else None,
         "removed_edit_count": removed_edit_count,
         "removed_key_cache": removed_key_cache,
+        "removed_monitor_count": removed_monitor_count,
     }
 
 

@@ -27,6 +27,7 @@ from .routers.chat_media import router as _chat_media_router
 from .routers.decrypt import router as _decrypt_router
 from .routers.import_decrypted import router as _import_decrypted_router
 from .routers.health import router as _health_router
+from .routers.keyword_monitor import router as _keyword_monitor_router
 from .routers.admin import router as _admin_router
 from .routers.account_archive_export import router as _account_archive_export_router
 from .routers.keys import router as _keys_router
@@ -73,6 +74,7 @@ app.include_router(_import_decrypted_router)
 app.include_router(_decrypt_router)
 app.include_router(_keys_router)
 app.include_router(_media_router)
+app.include_router(_keyword_monitor_router)
 app.include_router(_chat_router)
 app.include_router(_chat_contacts_router)
 app.include_router(_chat_export_router)
