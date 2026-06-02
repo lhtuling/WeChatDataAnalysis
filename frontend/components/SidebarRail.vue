@@ -22,6 +22,37 @@
         </button>
       </div>
 
+      <!-- Keyword Monitor -->
+      <div
+        class="sidebar-rail-action w-full h-[var(--sidebar-rail-step)] flex items-center justify-center cursor-pointer group"
+        :title="keywordMonitorTitle"
+        @click="openKeywordMonitorDialog"
+      >
+        <div class="sidebar-rail-plate relative w-[var(--sidebar-rail-btn)] h-[var(--sidebar-rail-btn)] rounded-md flex items-center justify-center transition-colors bg-transparent">
+          <svg
+            class="sidebar-rail-icon w-[var(--sidebar-rail-icon)] h-[var(--sidebar-rail-icon)]"
+            :class="{ 'sidebar-rail-icon-active': keywordMonitorDialogOpen || keywordMonitorEnabled || keywordMonitorUnread > 0 }"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="1.7"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            aria-hidden="true"
+          >
+            <circle cx="11" cy="11" r="6" />
+            <path d="M16 16l4 4" />
+            <path d="M11 8v3l2 2" />
+          </svg>
+          <span
+            v-if="keywordMonitorUnread > 0"
+            class="absolute -right-1 -top-1 min-w-[16px] rounded-full bg-[#ff4d4f] px-1 text-center text-[10px] font-semibold leading-[16px] text-white shadow-sm"
+          >
+            {{ keywordMonitorBadgeText }}
+          </span>
+        </div>
+      </div>
+
       <!-- Chat -->
       <div
         class="sidebar-rail-action w-full h-[var(--sidebar-rail-step)] flex items-center justify-center cursor-pointer group"
@@ -195,37 +226,6 @@
         </div>
       </div>
 
-      <!-- Keyword Monitor -->
-      <div
-        class="sidebar-rail-action w-full h-[var(--sidebar-rail-step)] flex items-center justify-center cursor-pointer group"
-        :title="keywordMonitorTitle"
-        @click="goKeywordMonitorSettings"
-      >
-        <div class="sidebar-rail-plate relative w-[var(--sidebar-rail-btn)] h-[var(--sidebar-rail-btn)] rounded-md flex items-center justify-center transition-colors bg-transparent">
-          <svg
-            class="sidebar-rail-icon w-[var(--sidebar-rail-icon)] h-[var(--sidebar-rail-icon)]"
-            :class="{ 'sidebar-rail-icon-active': keywordMonitorEnabled || keywordMonitorUnread > 0 }"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            stroke-width="1.7"
-            stroke-linecap="round"
-            stroke-linejoin="round"
-            aria-hidden="true"
-          >
-            <circle cx="11" cy="11" r="6" />
-            <path d="M16 16l4 4" />
-            <path d="M11 8v3l2 2" />
-          </svg>
-          <span
-            v-if="keywordMonitorUnread > 0"
-            class="absolute -right-1 -top-1 min-w-[16px] rounded-full bg-[#ff4d4f] px-1 text-center text-[10px] font-semibold leading-[16px] text-white shadow-sm"
-          >
-            {{ keywordMonitorBadgeText }}
-          </span>
-        </div>
-      </div>
-
       <!-- ImgHelper (Auto download large images) -->
       <div
         class="sidebar-rail-action w-full h-[var(--sidebar-rail-step)] flex items-center justify-center group"
@@ -343,6 +343,164 @@
   </div>
 
   <div
+    v-if="keywordMonitorDialogOpen"
+    class="keyword-monitor-dialog fixed inset-0 z-[130] flex items-start justify-start bg-black/25 px-3 py-4 sm:px-4"
+    @click.self="closeKeywordMonitorDialog"
+  >
+    <div class="ml-[60px] mt-2 flex max-h-[calc(100vh-32px)] w-[min(760px,calc(100vw-76px))] flex-col overflow-hidden rounded-[10px] border border-[#e6e6e6] bg-white shadow-2xl">
+      <div class="flex items-center justify-between gap-3 border-b border-[#efefef] px-4 py-3">
+        <div class="min-w-0 flex-1">
+          <div class="flex min-w-0 items-center gap-2">
+            <span class="truncate text-[14px] font-semibold text-[#222]">关键词监控记录</span>
+            <span
+              v-if="keywordMonitorUnread > 0"
+              class="shrink-0 rounded-full bg-[#ff4d4f] px-2 py-0.5 text-[10px] font-semibold leading-4 text-white"
+            >
+              {{ keywordMonitorUnread }} 未读
+            </span>
+          </div>
+          <div class="mt-0.5 truncate text-[11px] text-[#8a8a8a]">{{ keywordMonitorHitsStatusText }}</div>
+        </div>
+        <div class="flex shrink-0 items-center gap-1.5">
+          <button
+            type="button"
+            class="flex h-8 items-center rounded-[6px] border border-[#e2e2e2] bg-white px-2.5 text-[12px] text-[#333] transition hover:bg-[#f9f9f9] disabled:cursor-not-allowed disabled:opacity-50"
+            :disabled="keywordMonitorHitsLoading || !selectedAccount"
+            @click="refreshKeywordMonitorHits"
+          >
+            刷新
+          </button>
+          <button
+            type="button"
+            class="flex h-8 items-center rounded-[6px] border border-[#e2e2e2] bg-white px-2.5 text-[12px] text-[#333] transition hover:bg-[#f9f9f9] disabled:cursor-not-allowed disabled:opacity-50"
+            :disabled="keywordMonitorReadAllLoading || keywordMonitorUnread <= 0"
+            @click="markAllKeywordMonitorHitsRead"
+          >
+            全部已读
+          </button>
+          <button
+            type="button"
+            class="flex h-8 items-center rounded-[6px] border border-[#d8efe2] bg-[#f4fbf7] px-2.5 text-[12px] font-medium text-[#147345] transition hover:bg-[#eaf8f0]"
+            @click="goKeywordMonitorSettings"
+          >
+            设置
+          </button>
+          <button
+            type="button"
+            class="flex h-8 w-8 items-center justify-center rounded-[6px] text-[#888] transition hover:bg-[#f2f2f2] hover:text-[#222]"
+            title="关闭"
+            @click="closeKeywordMonitorDialog"
+          >
+            <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+              <path d="M6 6l12 12M18 6L6 18" />
+            </svg>
+          </button>
+        </div>
+      </div>
+
+      <div class="min-h-0 flex-1 overflow-hidden px-4 py-3">
+        <div v-if="keywordMonitorDialogError" class="mb-2 rounded-[6px] border border-red-100 bg-red-50 px-3 py-2 text-[12px] text-red-700">
+          {{ keywordMonitorDialogError }}
+        </div>
+        <div v-if="!selectedAccount" class="rounded-[8px] border border-[#ededed] bg-[#fafafa] px-3 py-8 text-center text-[12px] text-[#888]">
+          选择账号后可查看监控记录
+        </div>
+        <div v-else class="flex h-full min-h-0 flex-col overflow-hidden">
+          <div class="mb-2 grid grid-cols-3 overflow-hidden rounded-[8px] border border-[#ededed] bg-[#fafafa] text-[11px] text-[#777]">
+            <div class="border-r border-[#ededed] px-3 py-2">
+              <div class="text-[10px] text-[#999]">状态</div>
+              <div class="mt-0.5 font-medium text-[#333]">{{ keywordMonitorEnabled ? '已启用' : '未启用' }}</div>
+            </div>
+            <div class="border-r border-[#ededed] px-3 py-2">
+              <div class="text-[10px] text-[#999]">未读</div>
+              <div class="mt-0.5 font-medium text-[#333] tabular-nums">{{ keywordMonitorUnread }}</div>
+            </div>
+            <div class="px-3 py-2">
+              <div class="text-[10px] text-[#999]">记录</div>
+              <div class="mt-0.5 font-medium text-[#333] tabular-nums">{{ keywordMonitorHitsTotal }}</div>
+            </div>
+          </div>
+
+          <div class="min-h-[280px] flex-1 overflow-y-auto rounded-[8px] border border-[#ededed] bg-[#fcfcfc]">
+            <button
+              v-for="hit in keywordMonitorHits"
+              :key="hit.id"
+              type="button"
+              class="block w-full border-b border-[#eeeeee] bg-white px-3.5 py-3 text-left transition last:border-b-0 hover:bg-[#f8fbf9]"
+              @click="openKeywordMonitorHit(hit)"
+            >
+              <div class="flex min-w-0 items-start justify-between gap-3">
+                <div class="min-w-0 flex-1">
+                  <div class="flex min-w-0 items-center gap-2">
+                    <span v-if="!hit.isRead" class="h-1.5 w-1.5 shrink-0 rounded-full bg-[#ff4d4f]" />
+                    <span class="truncate text-[13px] font-semibold text-[#222]" :class="{ 'privacy-blur': privacyMode }">
+                      {{ keywordMonitorHitConversationText(hit) }}
+                    </span>
+                    <span class="shrink-0 rounded-[4px] bg-[#eef7f2] px-1.5 py-0.5 text-[10px] text-[#147345]">
+                      {{ keywordMonitorHitTypeText(hit) }}
+                    </span>
+                  </div>
+                  <div class="mt-1 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5 text-[11px] text-[#777]">
+                    <span class="truncate" :class="{ 'privacy-blur': privacyMode }">
+                      {{ keywordMonitorHitSenderText(hit) }}
+                    </span>
+                    <span class="tabular-nums">{{ formatKeywordMonitorTime(hit.createTime) }}</span>
+                    <span class="truncate text-[#999]">{{ hit.messageId }}</span>
+                  </div>
+                </div>
+                <span class="shrink-0 rounded-[6px] border border-[#e2e2e2] bg-white px-2 py-1 text-[11px] text-[#555]">
+                  定位
+                </span>
+              </div>
+
+              <div
+                class="mt-2 max-h-[132px] overflow-y-auto whitespace-pre-wrap break-words rounded-[6px] border border-[#eeeeee] bg-[#fafafa] px-2.5 py-2 text-[12px] leading-relaxed text-[#222]"
+                :class="{ 'privacy-blur': privacyMode }"
+              >
+                {{ keywordMonitorHitContent(hit) }}
+              </div>
+
+              <div class="mt-2 flex flex-wrap gap-1.5">
+                <span
+                  v-for="kw in keywordMonitorHitKeywords(hit)"
+                  :key="`${hit.id}-${kw}`"
+                  class="rounded-[4px] bg-[#eaf8f0] px-1.5 py-0.5 text-[10px] text-[#147345]"
+                >
+                  {{ kw }}
+                </span>
+                <span v-if="keywordMonitorHitKeywords(hit).length === 0" class="text-[10px] text-[#aaa]">
+                  未记录命中词
+                </span>
+              </div>
+            </button>
+
+            <div v-if="!keywordMonitorHitsLoading && keywordMonitorHits.length === 0" class="px-3 py-14 text-center">
+              <div class="text-[13px] font-medium text-[#555]">暂无监控记录</div>
+              <div class="mt-1 text-[11px] text-[#999]">启用关键词后，新消息命中会显示在这里</div>
+            </div>
+            <div v-if="keywordMonitorHitsLoading" class="px-3 py-10 text-center text-[12px] text-[#999]">
+              加载中...
+            </div>
+          </div>
+
+          <div class="mt-2 flex items-center justify-between gap-3">
+            <div class="min-w-0 truncate text-[11px] text-[#999]">{{ keywordMonitorHitsFooterText }}</div>
+            <button
+              v-if="keywordMonitorHitsHasMore"
+              type="button"
+              class="shrink-0 rounded-[6px] border border-[#e2e2e2] bg-white px-3 py-1.5 text-[12px] text-[#333] transition hover:bg-[#f9f9f9] disabled:cursor-not-allowed disabled:opacity-50"
+              :disabled="keywordMonitorHitsLoading"
+              @click="loadMoreKeywordMonitorHits"
+            >
+              加载更多
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div
     v-if="accountDialogOpen"
     class="account-info-dialog fixed inset-0 z-[130] flex items-center justify-center bg-black/35 px-4"
     @click.self="closeAccountDialog"
@@ -448,7 +606,13 @@ const imgHelperStore = useImgHelperStore()
 const { enabled: imgHelperEnabled, checking: imgHelperChecking, toggling: imgHelperToggling, error: imgHelperError } = storeToRefs(imgHelperStore)
 
 const { open: settingsDialogOpen, openDialog: openSettingsDialog } = useSettingsDialog()
-const { getChatAccountInfo, deleteChatAccount, getKeywordMonitorSummary } = useApi()
+const {
+  getChatAccountInfo,
+  deleteChatAccount,
+  getKeywordMonitorSummary,
+  listKeywordMonitorHits,
+  markKeywordMonitorHitsRead,
+} = useApi()
 
 const showGlobalExportEntry = true
 const accountDialogOpen = ref(false)
@@ -462,7 +626,16 @@ const accountInfoApiUnsupported = ref(false)
 const deleteAccountApiUnsupported = ref(false)
 const keywordMonitorEnabled = ref(false)
 const keywordMonitorUnread = ref(0)
+const keywordMonitorHitsTotal = ref(0)
 const keywordMonitorSummaryLoading = ref(false)
+const keywordMonitorDialogOpen = ref(false)
+const keywordMonitorHits = ref([])
+const keywordMonitorHitsOffset = ref(0)
+const keywordMonitorHitsHasMore = ref(false)
+const keywordMonitorHitsLoading = ref(false)
+const keywordMonitorDialogError = ref('')
+const keywordMonitorReadAllLoading = ref(false)
+const keywordMonitorHitsLimit = 50
 let keywordMonitorSummaryTimer = null
 
 const keywordMonitorBadgeText = computed(() => {
@@ -475,6 +648,23 @@ const keywordMonitorTitle = computed(() => {
   const unread = Number(keywordMonitorUnread.value || 0)
   if (unread > 0) return `关键词监控：${unread} 条未读`
   return keywordMonitorEnabled.value ? '关键词监控' : '关键词监控设置'
+})
+
+const keywordMonitorHitsStatusText = computed(() => {
+  if (!String(selectedAccount.value || '').trim()) return '未选择账号'
+  if (keywordMonitorHitsLoading.value && keywordMonitorHits.value.length === 0) return '正在读取监控记录...'
+  const total = Number(keywordMonitorHitsTotal.value || 0)
+  const unread = Number(keywordMonitorUnread.value || 0)
+  if (total > 0) return `共 ${total} 条命中，${unread} 条未读`
+  return keywordMonitorEnabled.value ? '暂无命中记录' : '监控未启用'
+})
+
+const keywordMonitorHitsFooterText = computed(() => {
+  const loaded = Number(keywordMonitorHits.value.length || 0)
+  const total = Number(keywordMonitorHitsTotal.value || 0)
+  if (total > 0) return `已显示 ${loaded} / ${total} 条`
+  if (keywordMonitorHitsLoading.value) return '正在加载...'
+  return '没有更多记录'
 })
 
 const sessionUpdatedAtText = computed(() => {
@@ -583,12 +773,163 @@ const closeExportDialog = () => {
   exportDialogOpen.value = false
 }
 
+const resetKeywordMonitorHits = () => {
+  keywordMonitorHits.value = []
+  keywordMonitorHitsOffset.value = 0
+  keywordMonitorHitsTotal.value = 0
+  keywordMonitorHitsHasMore.value = false
+  keywordMonitorDialogError.value = ''
+}
+
+const keywordMonitorHitConversationText = (hit) => {
+  return String(hit?.conversationName || hit?.username || '未知会话').trim()
+}
+
+const keywordMonitorHitSenderText = (hit) => {
+  return String(hit?.senderDisplayName || hit?.senderUsername || '未知发送人').trim()
+}
+
+const keywordMonitorHitContent = (hit) => {
+  return String(hit?.content || '').trim() || '（无可读文本）'
+}
+
+const keywordMonitorHitKeywords = (hit) => {
+  if (!Array.isArray(hit?.matchedKeywords)) return []
+  return hit.matchedKeywords.map((item) => String(item || '').trim()).filter(Boolean)
+}
+
+const keywordMonitorHitTypeText = (hit) => {
+  const renderType = String(hit?.renderType || '').trim()
+  const labels = {
+    text: '文本',
+    link: '链接',
+    app: '应用',
+    quote: '引用',
+    image: '图片',
+    video: '视频',
+    voice: '语音',
+    location: '位置',
+    file: '文件',
+    transfer: '转账',
+    red_packet: '红包',
+    redpacket: '红包',
+    chat_history: '合并记录',
+  }
+  if (labels[renderType]) return labels[renderType]
+  if (renderType) return renderType
+  const type = Number(hit?.type || 0)
+  return type > 0 ? `类型 ${type}` : '消息'
+}
+
+const formatKeywordMonitorTime = (value) => {
+  const n = Number(value || 0)
+  if (!Number.isFinite(n) || n <= 0) return ''
+  const ms = n > 1_000_000_000_000 ? n : n * 1000
+  try {
+    return new Date(ms).toLocaleString('zh-CN', {
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+    })
+  } catch {
+    return ''
+  }
+}
+
+const refreshKeywordMonitorHits = async (options = {}) => {
+  const account = String(selectedAccount.value || '').trim()
+  const append = !!options.append
+  if (!account) {
+    resetKeywordMonitorHits()
+    return
+  }
+  if (keywordMonitorHitsLoading.value) return
+  keywordMonitorHitsLoading.value = true
+  keywordMonitorDialogError.value = ''
+  try {
+    const offset = append ? Number(keywordMonitorHitsOffset.value || 0) : 0
+    const res = await listKeywordMonitorHits({ account, limit: keywordMonitorHitsLimit, offset })
+    const hits = Array.isArray(res?.hits) ? res.hits : []
+    keywordMonitorHits.value = append ? [...keywordMonitorHits.value, ...hits] : hits
+    keywordMonitorHitsOffset.value = offset + hits.length
+    keywordMonitorHitsTotal.value = Math.max(0, Number(res?.total || 0))
+    keywordMonitorHitsHasMore.value = !!res?.hasMore
+  } catch (e) {
+    keywordMonitorDialogError.value = e?.message || '读取监控记录失败'
+  } finally {
+    keywordMonitorHitsLoading.value = false
+  }
+}
+
+const loadMoreKeywordMonitorHits = async () => {
+  if (!keywordMonitorHitsHasMore.value || keywordMonitorHitsLoading.value) return
+  await refreshKeywordMonitorHits({ append: true })
+}
+
+const openKeywordMonitorDialog = async () => {
+  keywordMonitorDialogOpen.value = true
+  keywordMonitorDialogError.value = ''
+  await Promise.all([
+    refreshKeywordMonitorSummary(),
+    refreshKeywordMonitorHits(),
+  ])
+}
+
+const closeKeywordMonitorDialog = () => {
+  keywordMonitorDialogOpen.value = false
+}
+
+const markAllKeywordMonitorHitsRead = async () => {
+  const account = String(selectedAccount.value || '').trim()
+  if (!account || keywordMonitorReadAllLoading.value || keywordMonitorUnread.value <= 0) return
+  keywordMonitorReadAllLoading.value = true
+  keywordMonitorDialogError.value = ''
+  try {
+    await markKeywordMonitorHitsRead({ account })
+    keywordMonitorUnread.value = 0
+    keywordMonitorHits.value = keywordMonitorHits.value.map((hit) => ({ ...hit, isRead: true }))
+    await refreshKeywordMonitorSummary()
+  } catch (e) {
+    keywordMonitorDialogError.value = e?.message || '标记已读失败'
+  } finally {
+    keywordMonitorReadAllLoading.value = false
+  }
+}
+
+const openKeywordMonitorHit = async (hit) => {
+  const account = String(selectedAccount.value || '').trim()
+  const username = String(hit?.username || '').trim()
+  const messageId = String(hit?.messageId || '').trim()
+  const hitId = Number(hit?.id || 0)
+  if (!account || !username || !messageId) return
+  try {
+    if (hitId > 0 && !hit?.isRead) {
+      await markKeywordMonitorHitsRead({ account, hitIds: [hitId] })
+      keywordMonitorHits.value = keywordMonitorHits.value.map((item) => (
+        Number(item?.id || 0) === hitId ? { ...item, isRead: true } : item
+      ))
+      keywordMonitorUnread.value = Math.max(0, Number(keywordMonitorUnread.value || 0) - 1)
+      await refreshKeywordMonitorSummary()
+    }
+  } catch {}
+  closeKeywordMonitorDialog()
+  await navigateTo({
+    path: `/chat/${encodeURIComponent(username)}`,
+    query: {
+      anchor_id: messageId,
+      monitor_hit: hitId > 0 ? String(hitId) : undefined,
+    },
+  })
+}
+
 const refreshKeywordMonitorSummary = async () => {
   const account = String(selectedAccount.value || '').trim()
   if (!account || keywordMonitorSummaryLoading.value) {
     if (!account) {
       keywordMonitorEnabled.value = false
       keywordMonitorUnread.value = 0
+      keywordMonitorHitsTotal.value = 0
     }
     return
   }
@@ -597,9 +938,11 @@ const refreshKeywordMonitorSummary = async () => {
     const res = await getKeywordMonitorSummary({ account })
     keywordMonitorEnabled.value = !!res?.enabled
     keywordMonitorUnread.value = Math.max(0, Number(res?.unread || 0))
+    keywordMonitorHitsTotal.value = Math.max(0, Number(res?.total || 0))
   } catch {
     keywordMonitorEnabled.value = false
     keywordMonitorUnread.value = 0
+    keywordMonitorHitsTotal.value = 0
   } finally {
     keywordMonitorSummaryLoading.value = false
   }
@@ -610,11 +953,19 @@ watch(selectedAccount, () => {
     void loadAccountInfo()
   }
   void refreshKeywordMonitorSummary()
+  if (keywordMonitorDialogOpen.value) {
+    void refreshKeywordMonitorHits()
+  } else {
+    resetKeywordMonitorHits()
+  }
 })
 
 watch(settingsDialogOpen, (isOpen) => {
   if (isOpen) return
   void refreshKeywordMonitorSummary()
+  if (keywordMonitorDialogOpen.value) {
+    void refreshKeywordMonitorHits()
+  }
 })
 
 onMounted(async () => {
@@ -660,7 +1011,10 @@ const goBiz = async () => { await navigateTo('/biz') }
 const goWrapped = async () => { await navigateTo('/wrapped') }
 const goGuide = async () => { await navigateTo('/') }
 const goSettings = () => { openSettingsDialog() }
-const goKeywordMonitorSettings = () => { openSettingsDialog('keywordMonitor') }
+const goKeywordMonitorSettings = () => {
+  closeKeywordMonitorDialog()
+  openSettingsDialog('keywordMonitor')
+}
 
 const onWindowKeydown = (event) => {
   if (event?.key !== 'Escape') return
@@ -668,6 +1022,10 @@ const onWindowKeydown = (event) => {
     return
   }
   event.preventDefault()
+  if (keywordMonitorDialogOpen.value) {
+    closeKeywordMonitorDialog()
+    return
+  }
   if (accountDialogOpen.value) {
     closeAccountDialog()
   }
