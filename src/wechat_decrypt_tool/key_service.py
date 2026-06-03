@@ -50,6 +50,11 @@ def _summarize_key_payload(payload: Optional[Dict[str, Any]]) -> Dict[str, Any]:
     }
 
 
+def _is_unknown_local_wxid(value: Any) -> bool:
+    raw = str(value or "").strip().lower()
+    return raw in {"", "unknown", "none", "null"}
+
+
 def _resolve_wxid_dir_for_image_key(
         account: Optional[str] = None,
         *,
@@ -397,6 +402,20 @@ async def get_image_key_integrated_workflow(
                 target_account_wxid,
                 [str(item.get("wxid") or "").strip() for item in local_keys],
             )
+            if len(local_keys) == 1 and _is_unknown_local_wxid(local_keys[0].get("wxid")):
+                k = dict(local_keys[0])
+                k["wxid"] = target_account_wxid
+                logger.info(
+                    "[image_key] 本地算法返回单条未知账号密钥，按当前目标账号采用：target_wxid=%s payload=%s",
+                    target_account_wxid,
+                    _summarize_key_payload(k),
+                )
+                upsert_account_keys_in_store(
+                    account=target_account_wxid,
+                    image_xor_key=k['xor_key'],
+                    image_aes_key=k['aes_key']
+                )
+                return k
         else:
             # 如果没指定账号，返回第一个发现的并存入 store (如果有的话)
             k = local_keys[0]
