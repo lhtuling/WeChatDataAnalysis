@@ -453,6 +453,20 @@ export const useApi = () => {
     return await request(url)
   }
 
+  const saveSavedKeys = async (params = {}) => {
+    return await request('/keys', {
+      method: 'PUT',
+      body: {
+        account: params.account || null,
+        db_key: params.db_key == null ? null : String(params.db_key || ''),
+        image_xor_key: params.image_xor_key == null ? null : String(params.image_xor_key || ''),
+        image_aes_key: params.image_aes_key == null ? null : String(params.image_aes_key || ''),
+        db_storage_path: params.db_storage_path || null,
+        wxid_dir: params.wxid_dir || null
+      }
+    })
+  }
+
   // 批量解密所有图片
   const decryptAllMedia = async (params = {}) => {
     return await request('/media/decrypt_all', {
@@ -747,6 +761,7 @@ export const useApi = () => {
     downloadChatEmoji,
     saveMediaKeys,
     getSavedKeys,
+    saveSavedKeys,
     decryptAllMedia,
     createChatExport,
     getChatExport,

@@ -7,6 +7,97 @@
         <Stepper :steps="steps" :current-step="currentStep" />
       </div>
 
+      <div v-if="quickPanelAccounts.length > 0" class="mb-6 bg-white rounded-2xl border border-[#EDEDED]">
+        <div class="p-5">
+          <div class="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
+            <div>
+              <h2 class="text-lg font-bold text-[#000000e6]">已解密账号快捷维护</h2>
+              <p class="mt-1 text-sm text-[#7F7F7F]">已解密过的账号可以直接进入聊天；密钥可随时保存，数据库和图片也可以单独补解。</p>
+            </div>
+            <div class="flex flex-col gap-2 sm:flex-row sm:items-center">
+              <select
+                v-model="quickAccount"
+                @change="handleQuickAccountChange"
+                class="min-w-[220px] rounded-lg border border-[#EDEDED] bg-white px-3 py-2 text-sm text-[#000000e6] focus:outline-none focus:ring-2 focus:ring-[#07C160]"
+              >
+                <option v-for="account in quickPanelAccounts" :key="account" :value="account">{{ account }}</option>
+              </select>
+              <button
+                type="button"
+                @click="enterChatForQuickAccount"
+                :disabled="!isQuickAccountDecrypted"
+                class="inline-flex items-center justify-center rounded-lg bg-[#07C160] px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-[#06AD56] disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                进入聊天
+              </button>
+            </div>
+          </div>
+
+          <div class="mt-4 grid grid-cols-1 gap-3 md:grid-cols-3">
+            <div>
+              <label class="mb-1 block text-xs font-medium text-[#7F7F7F]">数据库密钥</label>
+              <input
+                v-model="formData.key"
+                type="text"
+                placeholder="64位十六进制密钥"
+                class="w-full rounded-lg border border-[#EDEDED] px-3 py-2 font-mono text-sm focus:outline-none focus:ring-2 focus:ring-[#07C160]"
+              />
+            </div>
+            <div>
+              <label class="mb-1 block text-xs font-medium text-[#7F7F7F]">图片 XOR</label>
+              <input
+                v-model="manualKeys.xor_key"
+                type="text"
+                placeholder="例如 0xA5"
+                class="w-full rounded-lg border border-[#EDEDED] px-3 py-2 font-mono text-sm focus:outline-none focus:ring-2 focus:ring-[#10AEEF]"
+              />
+            </div>
+            <div>
+              <label class="mb-1 block text-xs font-medium text-[#7F7F7F]">图片 AES</label>
+              <input
+                v-model="manualKeys.aes_key"
+                type="text"
+                placeholder="16个字符，V4-V2需要"
+                class="w-full rounded-lg border border-[#EDEDED] px-3 py-2 font-mono text-sm focus:outline-none focus:ring-2 focus:ring-[#10AEEF]"
+              />
+            </div>
+          </div>
+
+          <div class="mt-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+            <div class="text-xs text-[#7F7F7F]">
+              <span v-if="isQuickAccountDecrypted">当前账号已解密，可直接进入或只补未处理内容。</span>
+              <span v-else>当前账号尚未在本项目中解密，保存密钥后可先执行数据库解密。</span>
+            </div>
+            <div class="flex flex-wrap gap-2">
+              <button
+                type="button"
+                @click="saveCurrentKeys"
+                :disabled="keySaving"
+                class="inline-flex items-center rounded-lg border border-[#07C160] bg-white px-3 py-2 text-sm font-medium text-[#07C160] transition-colors hover:bg-[#F0FFF7] disabled:cursor-wait disabled:opacity-50"
+              >
+                {{ keySaving ? '保存中...' : '保存密钥' }}
+              </button>
+              <button
+                type="button"
+                @click="decryptMissingDatabases"
+                :disabled="loading || !formData.db_storage_path"
+                class="inline-flex items-center rounded-lg bg-[#10AEEF] px-3 py-2 text-sm font-medium text-white transition-colors hover:bg-[#0D9BDC] disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                补解数据库
+              </button>
+              <button
+                type="button"
+                @click="decryptMissingImages"
+                :disabled="mediaDecrypting || !quickAccount"
+                class="inline-flex items-center rounded-lg bg-[#91D300] px-3 py-2 text-sm font-medium text-white transition-colors hover:bg-[#82BD00] disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                补解图片
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+
       <!-- 步骤1: 数据库解密 -->
       <div v-if="currentStep === 0" class="bg-white rounded-2xl border border-[#EDEDED]">
         <div class="p-8">
@@ -154,10 +245,14 @@
                 {{ dbDecryptProgress.current_file }}
               </div>
 
-              <div v-if="dbDecryptProgress.total > 0" class="mt-3 grid grid-cols-2 gap-4 text-center">
+              <div v-if="dbDecryptProgress.total > 0" class="mt-3 grid grid-cols-3 gap-4 text-center">
                 <div class="bg-gray-50 rounded-lg p-3">
                   <div class="text-lg font-bold text-[#07C160]">{{ dbDecryptProgress.success_count }}</div>
                   <div class="text-xs text-[#7F7F7F]">成功</div>
+                </div>
+                <div class="bg-gray-50 rounded-lg p-3">
+                  <div class="text-lg font-bold text-[#7F7F7F]">{{ dbDecryptProgress.skip_count }}</div>
+                  <div class="text-xs text-[#7F7F7F]">跳过</div>
                 </div>
                 <div class="bg-gray-50 rounded-lg p-3">
                   <div class="text-lg font-bold text-[#FA5151]">{{ dbDecryptProgress.fail_count }}</div>
@@ -661,9 +756,11 @@
 <script setup>
 import { ref, reactive, computed, onMounted, onBeforeUnmount } from 'vue'
 import { useApi } from '~/composables/useApi'
+import { useChatAccountsStore } from '~/stores/chatAccounts'
 import { normalizeWechatInstallPath, readStoredWechatInstallPath } from '~/lib/wechat-install-path'
 
-const { decryptDatabase, saveMediaKeys, getSavedKeys, getKeys, getImageKey, getWxStatus } = useApi()
+const { decryptDatabase, saveMediaKeys, getSavedKeys, saveSavedKeys, getKeys, getImageKey, getWxStatus, listChatAccounts } = useApi()
+const chatAccounts = useChatAccountsStore()
 
 const loading = ref(false)
 const error = ref('')
@@ -672,6 +769,9 @@ const currentStep = ref(0)
 const mediaAccount = ref('')
 const activeKeyAccount = ref('')
 const isGettingDbKey = ref(false)
+const decryptedAccounts = ref([])
+const quickAccount = ref('')
+const keySaving = ref(false)
 
 // 步骤定义
 const steps = [
@@ -680,6 +780,23 @@ const steps = [
   { title: '图片解密' },
   { title: '表情下载' }
 ]
+
+const quickPanelAccounts = computed(() => {
+  const seen = new Set()
+  const out = []
+  for (const value of [quickAccount.value, mediaAccount.value, ...decryptedAccounts.value]) {
+    const key = normalizeAccountId(value)
+    if (!key || seen.has(key)) continue
+    seen.add(key)
+    out.push(key)
+  }
+  return out
+})
+
+const isQuickAccountDecrypted = computed(() => {
+  const acc = normalizeAccountId(quickAccount.value)
+  return !!acc && decryptedAccounts.value.includes(acc)
+})
 
 // 表单数据
 const formData = reactive({
@@ -711,6 +828,20 @@ const manualKeyErrors = reactive({
 })
 
 const normalizeAccountId = (value) => String(value || '').trim()
+const inferAccountFromDbPath = (value) => {
+  const raw = String(value || '').trim()
+  if (!raw) return ''
+  const normalized = raw.replace(/[\\/]+$/, '')
+  const match = normalized.match(/(?:^|[\\/])([^\\/]+)[\\/]db_storage$/i)
+  if (match?.[1]) return normalizeAccountId(match[1])
+  const wxidMatch = normalized.match(/(wxid_[a-zA-Z0-9_]+)/)
+  return normalizeAccountId(wxidMatch?.[1] || '')
+}
+const resolveWorkingAccount = () => {
+  return normalizeAccountId(quickAccount.value)
+    || normalizeAccountId(mediaAccount.value)
+    || inferAccountFromDbPath(formData.db_storage_path)
+}
 const summarizeAesForLog = (value) => {
   const raw = String(value || '').trim()
   if (!raw) return ''
@@ -767,9 +898,10 @@ const normalizeAesKey = (value) => {
   return { ok: true, value: raw.slice(0, 16), message: '' }
 }
 
-const prefillKeysForAccount = async (account) => {
+const prefillKeysForAccount = async (account, options = {}) => {
   const acc = normalizeAccountId(account)
   if (!acc) return
+  const force = !!options.force
   logDecryptDebug('prefill:start', { account: acc })
   try {
     const resp = await getSavedKeys({
@@ -780,17 +912,21 @@ const prefillKeysForAccount = async (account) => {
     const keys = resp.keys || {}
 
     const dbKey = String(keys.db_key || '').trim()
-    if (dbKey && !String(formData.key || '').trim()) {
+    if (dbKey && (force || !String(formData.key || '').trim())) {
       formData.key = dbKey
+    }
+    const sourceDbStoragePath = String(keys.db_key_source_db_storage_path || '').trim()
+    if (sourceDbStoragePath && (force || !String(formData.db_storage_path || '').trim())) {
+      formData.db_storage_path = sourceDbStoragePath
     }
 
     const xorKey = String(keys.image_xor_key || '').trim()
-    if (xorKey && !String(manualKeys.xor_key || '').trim()) {
+    if (xorKey && (force || !String(manualKeys.xor_key || '').trim())) {
       manualKeys.xor_key = xorKey
     }
 
     const aesKey = String(keys.image_aes_key || '').trim()
-    if (aesKey && !String(manualKeys.aes_key || '').trim()) {
+    if (aesKey && (force || !String(manualKeys.aes_key || '').trim())) {
       manualKeys.aes_key = aesKey
     }
     logDecryptDebug('prefill:done', {
@@ -799,6 +935,7 @@ const prefillKeysForAccount = async (account) => {
       db_key_present: !!dbKey,
       db_key_store_account: String(keys.db_key_store_account || '').trim(),
       db_key_source_wxid_dir: String(keys.db_key_source_wxid_dir || '').trim(),
+      db_key_source_db_storage_path: sourceDbStoragePath,
       db_key_blocked_reason: String(keys.db_key_blocked_reason || '').trim(),
       ...summarizeKeyStateForLog(
         String(keys.image_xor_key || '').trim(),
@@ -851,9 +988,11 @@ const tryAutoFetchImageKeys = async (account) => {
   }
 }
 
-const ensureKeysForAccount = async (account) => {
+const ensureKeysForAccount = async (account, options = {}) => {
   const acc = normalizeAccountId(account)
   if (!acc) return
+  const force = !!options.force
+  const autoFetch = options.autoFetch !== false
 
   logDecryptDebug('ensure-keys:start', {
     account: acc,
@@ -870,12 +1009,64 @@ const ensureKeysForAccount = async (account) => {
   }
 
   activeKeyAccount.value = acc
-  await prefillKeysForAccount(acc)
-  await tryAutoFetchImageKeys(acc)
+  mediaAccount.value = acc
+  if (!quickAccount.value) quickAccount.value = acc
+  await prefillKeysForAccount(acc, { force })
+  if (autoFetch) {
+    await tryAutoFetchImageKeys(acc)
+  }
   logDecryptDebug('ensure-keys:done', {
     account: acc,
     manual: summarizeKeyStateForLog(manualKeys.xor_key, manualKeys.aes_key)
   })
+}
+
+const refreshDecryptedAccounts = async (options = {}) => {
+  try {
+    const resp = await listChatAccounts()
+    const accounts = Array.isArray(resp?.accounts) ? resp.accounts.map(normalizeAccountId).filter(Boolean) : []
+    decryptedAccounts.value = accounts
+
+    const preferred = normalizeAccountId(options.prefer)
+      || normalizeAccountId(quickAccount.value)
+      || normalizeAccountId(mediaAccount.value)
+      || accounts[0]
+      || ''
+    if (preferred) {
+      quickAccount.value = preferred
+      mediaAccount.value = preferred
+    }
+    logDecryptDebug('quick-accounts:loaded', {
+      count: accounts.length,
+      quick_account: quickAccount.value,
+      preferred
+    })
+  } catch (e) {
+    decryptedAccounts.value = []
+    logDecryptDebug('quick-accounts:error', { error: formatLogError(e) })
+  }
+}
+
+const handleQuickAccountChange = async () => {
+  const acc = resolveWorkingAccount()
+  if (!acc) return
+  formData.key = ''
+  clearManualKeys()
+  quickAccount.value = acc
+  mediaAccount.value = acc
+  await ensureKeysForAccount(acc, { force: true, autoFetch: false })
+}
+
+const enterChatForQuickAccount = async () => {
+  const acc = normalizeAccountId(quickAccount.value)
+  if (!acc || !isQuickAccountDecrypted.value) return
+  try {
+    chatAccounts.setSelectedAccount(acc)
+    await chatAccounts.ensureLoaded({ force: true })
+  } catch (e) {
+    logDecryptDebug('quick-enter-chat:store-error', { account: acc, error: formatLogError(e) })
+  }
+  navigateTo('/chat')
 }
 
 const handleGetDbKey = async () => {
@@ -951,6 +1142,76 @@ const applyManualKeys = () => {
   return true
 }
 
+const validateDbKeyIfPresent = () => {
+  formErrors.key = ''
+  const raw = String(formData.key || '').trim()
+  if (!raw) return { ok: true, value: '' }
+  if (raw.length !== 64) {
+    formErrors.key = '密钥必须是64位十六进制字符串'
+    return { ok: false, value: '' }
+  }
+  if (!/^[0-9a-fA-F]+$/.test(raw)) {
+    formErrors.key = '密钥必须是有效的十六进制字符串'
+    return { ok: false, value: '' }
+  }
+  return { ok: true, value: raw }
+}
+
+const saveCurrentKeys = async (options = {}) => {
+  const silent = !!options.silent
+  const account = resolveWorkingAccount()
+  if (!account) {
+    if (!silent) error.value = '请先选择账号或填写数据库路径'
+    return false
+  }
+
+  const dbKey = validateDbKeyIfPresent()
+  const mediaOk = applyManualKeys()
+  if (!dbKey.ok || !mediaOk) return false
+
+  const imageXorKey = String(mediaKeys.xor_key || '').trim()
+  const imageAesKey = String(mediaKeys.aes_key || '').trim()
+  if (!dbKey.value && !imageXorKey && !imageAesKey) {
+    if (!silent) warning.value = '没有需要保存的密钥'
+    return true
+  }
+
+  keySaving.value = true
+  error.value = ''
+  if (!silent) warning.value = ''
+
+  try {
+    const resp = await saveSavedKeys({
+      account,
+      db_key: dbKey.value || null,
+      image_xor_key: imageXorKey || null,
+      image_aes_key: imageAesKey || null,
+      db_storage_path: String(formData.db_storage_path || '').trim() || null
+    })
+    const savedAccount = normalizeAccountId(resp?.account || account)
+    quickAccount.value = savedAccount
+    mediaAccount.value = savedAccount
+    activeKeyAccount.value = savedAccount
+    await refreshDecryptedAccounts({ prefer: savedAccount })
+    if (!silent) {
+      warning.value = '密钥已保存，可以直接补解或进入聊天。'
+      setTimeout(() => { if (warning.value.includes('密钥已保存')) warning.value = '' }, 3000)
+    }
+    logDecryptDebug('keys:save-current:done', {
+      account: savedAccount,
+      db_key_present: !!dbKey.value,
+      keys: summarizeKeyStateForLog(imageXorKey, imageAesKey)
+    })
+    return true
+  } catch (e) {
+    if (!silent) error.value = e.message || '保存密钥失败'
+    logDecryptDebug('keys:save-current:error', { account, error: formatLogError(e) })
+    return false
+  } finally {
+    keySaving.value = false
+  }
+}
+
 const clearManualKeys = () => {
   logDecryptDebug('keys:clear', {
     active_account: activeKeyAccount.value,
@@ -979,6 +1240,7 @@ const dbDecryptProgress = reactive({
   current: 0,
   total: 0,
   success_count: 0,
+  skip_count: 0,
   fail_count: 0,
   current_file: '',
   status: '',
@@ -1111,6 +1373,7 @@ const resetDbDecryptProgress = () => {
   dbDecryptProgress.current = 0
   dbDecryptProgress.total = 0
   dbDecryptProgress.success_count = 0
+  dbDecryptProgress.skip_count = 0
   dbDecryptProgress.fail_count = 0
   dbDecryptProgress.current_file = ''
   dbDecryptProgress.status = ''
@@ -1143,15 +1406,51 @@ const resetEmojiDownloadProgress = () => {
   emojiDownloadProgress.message = ''
 }
 
+const decryptMissingDatabases = async () => {
+  const account = resolveWorkingAccount()
+  if (account) {
+    quickAccount.value = account
+    mediaAccount.value = account
+    await prefillKeysForAccount(account)
+  }
+  await handleDecrypt({ onlyMissing: true })
+}
+
+const decryptMissingImages = async () => {
+  const account = resolveWorkingAccount()
+  if (!account) {
+    error.value = '请先选择账号'
+    return
+  }
+
+  quickAccount.value = account
+  mediaAccount.value = account
+  error.value = ''
+  warning.value = ''
+
+  const ok = applyManualKeys()
+  if (!ok || manualKeyErrors.xor_key || manualKeyErrors.aes_key) return
+
+  if (mediaKeys.xor_key) {
+    const saved = await saveCurrentKeys({ silent: true })
+    if (!saved) return
+  }
+
+  currentStep.value = 2
+  await decryptAllImages()
+}
+
 // 处理解密
-const handleDecrypt = async () => {
+const handleDecrypt = async (options = {}) => {
+  const onlyMissing = !!options?.onlyMissing
   if (!validateForm()) {
     return
   }
 
   logDecryptDebug('decrypt:start', {
     db_storage_path: String(formData.db_storage_path || '').trim(),
-    db_key_length: String(formData.key || '').trim().length
+    db_key_length: String(formData.key || '').trim().length,
+    only_missing: onlyMissing
   })
   loading.value = true
   error.value = ''
@@ -1174,7 +1473,8 @@ const handleDecrypt = async () => {
     if (!canSse) {
       const result = await decryptDatabase({
         key: formData.key,
-        db_storage_path: formData.db_storage_path
+        db_storage_path: formData.db_storage_path,
+        only_missing: onlyMissing
       })
 
       if (result.status === 'completed') {
@@ -1196,6 +1496,7 @@ const handleDecrypt = async () => {
           accounts: Object.keys(result.account_results || {})
         })
 
+        await refreshDecryptedAccounts({ prefer: mediaAccount.value })
         currentStep.value = 1
         await ensureKeysForAccount(mediaAccount.value)
 
@@ -1224,6 +1525,7 @@ const handleDecrypt = async () => {
     const params = new URLSearchParams()
     params.set('key', formData.key)
     params.set('db_storage_path', formData.db_storage_path)
+    if (onlyMissing) params.set('only_missing', 'true')
     const apiBase = useApiBase()
     const url = `${apiBase}/decrypt_stream?${params.toString()}`
 
@@ -1244,6 +1546,7 @@ const handleDecrypt = async () => {
           dbDecryptProgress.current = data.current || 0
           dbDecryptProgress.total = data.total || 0
           dbDecryptProgress.success_count = data.success_count || 0
+          dbDecryptProgress.skip_count = data.skip_count || 0
           dbDecryptProgress.fail_count = data.fail_count || 0
           dbDecryptProgress.current_file = data.current_file || ''
           dbDecryptProgress.status = data.status || ''
@@ -1256,6 +1559,7 @@ const handleDecrypt = async () => {
           dbDecryptProgress.current = data.total_databases || dbDecryptProgress.total
           dbDecryptProgress.total = data.total_databases || dbDecryptProgress.total
           dbDecryptProgress.success_count = data.success_count || 0
+          dbDecryptProgress.skip_count = data.skip_count || 0
           dbDecryptProgress.fail_count = data.failure_count || 0
           dbDecryptProgress.message = data.message || '解密完成'
 
@@ -1278,6 +1582,7 @@ const handleDecrypt = async () => {
             accounts: Object.keys(data.account_results || {})
           })
 
+          await refreshDecryptedAccounts({ prefer: mediaAccount.value })
           try {
             eventSource.close()
           } catch (e) {}
@@ -1659,6 +1964,10 @@ onMounted(async () => {
         console.error('解析账户信息失败:', e)
         logDecryptDebug('mounted:selected-account-error', { error: formatLogError(e) })
       }
+    }
+    await refreshDecryptedAccounts({ prefer: mediaAccount.value })
+    if (!selectedAccount && quickAccount.value) {
+      await ensureKeysForAccount(quickAccount.value, { force: false, autoFetch: false })
     }
   }
 })

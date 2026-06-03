@@ -967,7 +967,7 @@ class WeChatDatabaseDecryptor:
             logger.error(f"解密失败: {db_path}, 错误: {e}")
             return _finalize(False, str(e))
 
-def decrypt_wechat_databases(db_storage_path: str = None, key: str = None) -> dict:
+def decrypt_wechat_databases(db_storage_path: str = None, key: str = None, only_missing: bool = False) -> dict:
     """
     微信数据库解密API函数
 
@@ -1088,8 +1088,10 @@ def decrypt_wechat_databases(db_storage_path: str = None, key: str = None) -> di
 
     # 按账号批量解密
     success_count = 0
+    skipped_count = 0
     processed_files = []
     failed_files = []
+    skipped_files = []
     account_results = {}
     diagnostic_warning_count = 0
 
@@ -1120,8 +1122,10 @@ def decrypt_wechat_databases(db_storage_path: str = None, key: str = None) -> di
             pass
 
         account_success = 0
+        account_skipped = 0
         account_processed = []
         account_failed = []
+        account_skipped_files = []
         account_db_diagnostics = {}
         account_diagnostic_warning_count = 0
 
@@ -1131,6 +1135,14 @@ def decrypt_wechat_databases(db_storage_path: str = None, key: str = None) -> di
 
             # 生成输出文件名（保持原始文件名，不添加前缀）
             output_path = account_output_dir / db_name
+
+            if only_missing and output_path.exists() and output_path.is_file():
+                account_skipped += 1
+                skipped_count += 1
+                account_skipped_files.append(str(output_path))
+                skipped_files.append(str(output_path))
+                logger.info(f"已解密，跳过: {account_name}/{db_name}")
+                continue
 
             # 解密数据库
             logger.info(f"解密 {account_name}/{db_name}")
@@ -1169,12 +1181,14 @@ def decrypt_wechat_databases(db_storage_path: str = None, key: str = None) -> di
         account_results[account_name] = {
             "total": len(databases),
             "success": account_success,
-            "failed": len(databases) - account_success,
+            "failed": len(databases) - account_success - account_skipped,
+            "skipped": account_skipped,
             "output_dir": str(account_output_dir),
             "source_db_storage_path": str(source_db_storage_path),
             "source_wxid_dir": str(wxid_dir),
             "processed_files": account_processed,
             "failed_files": account_failed,
+            "skipped_files": account_skipped_files,
             "db_diagnostics": account_db_diagnostics,
             "diagnostic_warning_count": int(account_diagnostic_warning_count),
         }
@@ -1201,19 +1215,26 @@ def decrypt_wechat_databases(db_storage_path: str = None, key: str = None) -> di
         logger.info(f"账号 {account_name} 解密完成: 成功 {account_success}/{len(databases)}")
 
     # 返回结果
+    all_skipped = total_databases > 0 and skipped_count == total_databases
     result = {
-        "status": "success" if success_count > 0 else "error",
-        "message": build_decrypt_summary_message(
-            success_count=success_count,
-            total_databases=total_databases,
-            diagnostic_warning_count=diagnostic_warning_count,
+        "status": "success" if (success_count > 0 or all_skipped) else "error",
+        "message": (
+            "数据库已全部解密，无需重复处理。"
+            if all_skipped
+            else build_decrypt_summary_message(
+                success_count=success_count,
+                total_databases=total_databases,
+                diagnostic_warning_count=diagnostic_warning_count,
+            )
         ),
         "total_databases": total_databases,
         "successful_count": success_count,
-        "failed_count": total_databases - success_count,
+        "failed_count": total_databases - success_count - skipped_count,
+        "skipped_count": skipped_count,
         "output_directory": str(base_output_dir.absolute()),
         "processed_files": processed_files,
         "failed_files": failed_files,
+        "skipped_files": skipped_files,
         "account_results": account_results,  # 新增：按账号的详细结果
         "detected_accounts": detected_accounts,
         "diagnostic_warning_count": int(diagnostic_warning_count),
@@ -1222,7 +1243,8 @@ def decrypt_wechat_databases(db_storage_path: str = None, key: str = None) -> di
     logger.info("=" * 60)
     logger.info("解密任务完成!")
     logger.info(f"成功: {success_count}/{total_databases}")
-    logger.info(f"失败: {total_databases - success_count}/{total_databases}")
+    logger.info(f"跳过: {skipped_count}/{total_databases}")
+    logger.info(f"失败: {total_databases - success_count - skipped_count}/{total_databases}")
     logger.info(f"输出目录: {base_output_dir.absolute()}")
     logger.info("=" * 60)
 

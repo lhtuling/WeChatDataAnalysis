@@ -189,6 +189,85 @@ class TestDecryptStreamSSE(unittest.TestCase):
                 else:
                     os.environ["WECHAT_TOOL_BUILD_SESSION_LAST_MESSAGE"] = prev_build_cache
 
+    def test_decrypt_stream_only_missing_skips_existing_output(self):
+        from fastapi import FastAPI
+        from fastapi.testclient import TestClient
+
+        with TemporaryDirectory() as td:
+            root = Path(td)
+
+            prev_data_dir = os.environ.get("WECHAT_TOOL_DATA_DIR")
+            prev_build_cache = os.environ.get("WECHAT_TOOL_BUILD_SESSION_LAST_MESSAGE")
+            try:
+                os.environ["WECHAT_TOOL_DATA_DIR"] = str(root)
+                os.environ["WECHAT_TOOL_BUILD_SESSION_LAST_MESSAGE"] = "0"
+
+                import wechat_decrypt_tool.app_paths as app_paths
+                import wechat_decrypt_tool.routers.decrypt as decrypt_router
+
+                importlib.reload(app_paths)
+                importlib.reload(decrypt_router)
+
+                db_storage = root / "xwechat_files" / "wxid_skip_case" / "db_storage"
+                db_storage.mkdir(parents=True, exist_ok=True)
+                (db_storage / "MSG0.db").write_bytes(b"source")
+
+                output_db = root / "output" / "databases" / "wxid_skip" / "MSG0.db"
+                output_db.parent.mkdir(parents=True, exist_ok=True)
+                output_db.write_bytes(b"already decrypted")
+
+                app = FastAPI()
+                app.include_router(decrypt_router.router)
+                client = TestClient(app)
+
+                events: list[dict] = []
+                with mock.patch.object(decrypt_router, "upsert_account_keys_in_store") as upsert_mock:
+                    with client.stream(
+                        "GET",
+                        "/api/decrypt_stream",
+                        params={
+                            "key": "00" * 32,
+                            "db_storage_path": str(db_storage),
+                            "only_missing": "true",
+                        },
+                    ) as resp:
+                        self.assertEqual(resp.status_code, 200)
+
+                        for line in resp.iter_lines():
+                            if not line:
+                                continue
+                            if isinstance(line, bytes):
+                                line = line.decode("utf-8", errors="ignore")
+                            line = str(line)
+
+                            if line.startswith(":"):
+                                continue
+                            if not line.startswith("data: "):
+                                continue
+                            payload = json.loads(line[len("data: ") :])
+                            events.append(payload)
+                            if payload.get("type") in {"complete", "error"}:
+                                break
+
+                self.assertEqual(events[-1].get("type"), "complete")
+                self.assertEqual(events[-1].get("status"), "completed")
+                self.assertEqual(events[-1].get("success_count"), 0)
+                self.assertEqual(events[-1].get("skip_count"), 1)
+                self.assertEqual(events[-1].get("failure_count"), 0)
+                self.assertIn("无需重复处理", str(events[-1].get("message") or ""))
+                upsert_mock.assert_not_called()
+                self.assertEqual(output_db.read_bytes(), b"already decrypted")
+            finally:
+                _close_logging_handlers()
+                if prev_data_dir is None:
+                    os.environ.pop("WECHAT_TOOL_DATA_DIR", None)
+                else:
+                    os.environ["WECHAT_TOOL_DATA_DIR"] = prev_data_dir
+                if prev_build_cache is None:
+                    os.environ.pop("WECHAT_TOOL_BUILD_SESSION_LAST_MESSAGE", None)
+                else:
+                    os.environ["WECHAT_TOOL_BUILD_SESSION_LAST_MESSAGE"] = prev_build_cache
+
 
 if __name__ == "__main__":
     unittest.main()

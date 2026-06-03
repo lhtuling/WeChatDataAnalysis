@@ -155,6 +155,7 @@ class DecryptRequest(BaseModel):
 
     key: str = Field(..., description="解密密钥，64位十六进制字符串")
     db_storage_path: str = Field(..., description="数据库存储路径，必须是绝对路径")
+    only_missing: bool = Field(False, description="只解密输出目录中尚不存在的数据库")
 
 
 @router.post("/api/decrypt", summary="解密微信数据库")
@@ -184,6 +185,7 @@ async def decrypt_databases(request: DecryptRequest):
             results = decrypt_wechat_databases(
                 db_storage_path=request.db_storage_path,
                 key=request.key,
+                only_missing=bool(request.only_missing),
             )
         finally:
             _release_decrypt_account_guards(guards, reason="decrypt:post")
@@ -212,6 +214,7 @@ async def decrypt_databases(request: DecryptRequest):
             "total_databases": results["total_databases"],
             "success_count": results["successful_count"],
             "failure_count": results["failed_count"],
+            "skip_count": results.get("skipped_count", 0),
             "output_directory": results["output_directory"],
             "message": results["message"],
             "processed_files": results["processed_files"],
@@ -232,6 +235,7 @@ async def decrypt_databases_stream(
     request: Request,
     key: str | None = None,
     db_storage_path: str | None = None,
+    only_missing: bool = False,
 ):
     """通过SSE实时推送数据库解密进度。
 
@@ -316,8 +320,10 @@ async def decrypt_databases_stream(
             # 4) Decrypt per account, stream progress.
             success_count = 0
             fail_count = 0
+            skip_count = 0
             processed_files: list[str] = []
             failed_files: list[str] = []
+            skipped_files: list[str] = []
             account_results: dict = {}
             diagnostic_warning_count = 0
             overall_current = 0
@@ -343,8 +349,10 @@ async def decrypt_databases_stream(
                     pass
 
                 account_success = 0
+                account_skipped = 0
                 account_processed: list[str] = []
                 account_failed: list[str] = []
+                account_skipped_files: list[str] = []
                 account_db_diagnostics: dict[str, dict] = {}
                 account_diagnostic_warning_count = 0
 
@@ -365,6 +373,7 @@ async def decrypt_databases_stream(
                             "total": total_databases,
                             "success_count": success_count,
                             "fail_count": fail_count,
+                            "skip_count": skip_count,
                             "current_file": current_file,
                             "status": "processing",
                             "message": "解密中...",
@@ -372,6 +381,28 @@ async def decrypt_databases_stream(
                     )
 
                     output_path = account_output_dir / db_name
+                    if only_missing and output_path.exists() and output_path.is_file():
+                        skip_count += 1
+                        account_skipped += 1
+                        account_skipped_files.append(str(output_path))
+                        skipped_files.append(str(output_path))
+                        yield _sse(
+                            {
+                                "type": "progress",
+                                "current": overall_current,
+                                "total": total_databases,
+                                "success_count": success_count,
+                                "fail_count": fail_count,
+                                "skip_count": skip_count,
+                                "current_file": current_file,
+                                "status": "skip",
+                                "message": "已解密，跳过",
+                            }
+                        )
+                        if overall_current % 5 == 0:
+                            await asyncio.sleep(0)
+                        continue
+
                     task = asyncio.create_task(asyncio.to_thread(decryptor.decrypt_database, db_path, str(output_path)))
 
                     # Wait with heartbeat (can't yield while awaiting the thread directly).
@@ -428,6 +459,7 @@ async def decrypt_databases_stream(
                         "total": total_databases,
                         "success_count": success_count,
                         "fail_count": fail_count,
+                        "skip_count": skip_count,
                         "current_file": current_file,
                         "status": status,
                         "message": msg,
@@ -451,12 +483,14 @@ async def decrypt_databases_stream(
                 account_results[account] = {
                     "total": len(dbs),
                     "success": account_success,
-                    "failed": len(dbs) - account_success,
+                    "failed": len(dbs) - account_success - account_skipped,
+                    "skipped": account_skipped,
                     "output_dir": str(account_output_dir),
                     "source_db_storage_path": str(source_db_storage_path),
                     "source_wxid_dir": str(wxid_dir),
                     "processed_files": account_processed,
                     "failed_files": account_failed,
+                    "skipped_files": account_skipped_files,
                     "db_diagnostics": account_db_diagnostics,
                     "diagnostic_warning_count": int(account_diagnostic_warning_count),
                 }
@@ -499,20 +533,27 @@ async def decrypt_databases_stream(
                     except Exception as e:
                         account_results[account]["session_last_message"] = {"status": "error", "message": str(e)}
 
-            status = "completed" if success_count > 0 else "failed"
+            status = "completed" if (success_count > 0 or (total_databases > 0 and skip_count == total_databases)) else "failed"
+            message = (
+                "数据库已全部解密，无需重复处理。"
+                if total_databases > 0 and skip_count == total_databases
+                else build_decrypt_summary_message(
+                    success_count=success_count,
+                    total_databases=total_databases,
+                    diagnostic_warning_count=diagnostic_warning_count,
+                )
+            )
             result = {
                 "status": status,
                 "total_databases": total_databases,
                 "success_count": success_count,
-                "failure_count": total_databases - success_count,
+                "failure_count": total_databases - success_count - skip_count,
+                "skip_count": skip_count,
                 "output_directory": str(base_output_dir.absolute()),
-                "message": build_decrypt_summary_message(
-                    success_count=success_count,
-                    total_databases=total_databases,
-                    diagnostic_warning_count=diagnostic_warning_count,
-                ),
+                "message": message,
                 "processed_files": processed_files,
                 "failed_files": failed_files,
+                "skipped_files": skipped_files,
                 "account_results": account_results,
                 "diagnostic_warning_count": int(diagnostic_warning_count),
             }

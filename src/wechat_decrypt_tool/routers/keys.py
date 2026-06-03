@@ -1,12 +1,13 @@
 from pathlib import Path
 from typing import Optional
 
-from fastapi import APIRouter
+from fastapi import APIRouter, HTTPException
+from pydantic import BaseModel, Field
 
 from ..logging_config import get_logger
-from ..key_store import get_account_keys_from_store, normalize_key_store_path
+from ..key_store import get_account_keys_from_store, normalize_key_store_path, upsert_account_keys_in_store
 from ..key_service import get_db_key_workflow, get_image_key_integrated_workflow
-from ..media_helpers import _load_media_keys, _resolve_account_dir
+from ..media_helpers import _load_media_keys, _resolve_account_dir, _save_media_keys
 from ..path_fix import PathFixRoute
 
 router = APIRouter(route_class=PathFixRoute)
@@ -63,6 +64,70 @@ def _build_saved_key_candidates(account_name: Optional[str], request_account: Op
         out.append(key)
 
     return out
+
+
+def _resolve_key_save_account(
+    *,
+    account: Optional[str],
+    db_storage_path: Optional[str],
+    wxid_dir: Optional[str],
+) -> str:
+    for value in [
+        account,
+        Path(str(wxid_dir or "")).name if str(wxid_dir or "").strip() else "",
+        Path(_resolve_requested_wxid_dir(db_storage_path=db_storage_path, wxid_dir=wxid_dir)).name
+        if (db_storage_path or wxid_dir)
+        else "",
+    ]:
+        key = str(value or "").strip()
+        if key:
+            return key
+    return ""
+
+
+def _validate_db_key(value: Optional[str]) -> str:
+    raw = str(value or "").strip()
+    if not raw:
+        return ""
+    if len(raw) != 64:
+        raise HTTPException(status_code=400, detail="数据库密钥必须是64位十六进制字符串")
+    try:
+        bytes.fromhex(raw)
+    except Exception:
+        raise HTTPException(status_code=400, detail="数据库密钥必须是有效的十六进制字符串")
+    return raw
+
+
+def _normalize_xor_key(value: Optional[str]) -> str:
+    raw = str(value or "").strip()
+    if not raw:
+        return ""
+    try:
+        xor_hex = raw.lower().replace("0x", "")
+        xor_int = int(xor_hex, 16)
+    except Exception:
+        raise HTTPException(status_code=400, detail="XOR密钥格式无效，请使用 0xA5 或 A5")
+    if xor_int < 0 or xor_int > 255:
+        raise HTTPException(status_code=400, detail="XOR密钥必须在 0x00-0xFF 范围内")
+    return f"0x{xor_int:02X}"
+
+
+def _normalize_aes_key(value: Optional[str]) -> str:
+    raw = str(value or "").strip()
+    if not raw:
+        return ""
+    if len(raw) < 16:
+        raise HTTPException(status_code=400, detail="AES密钥长度不足，需要至少16个字符")
+    return raw[:16]
+
+
+class SavedKeysSaveRequest(BaseModel):
+    account: Optional[str] = Field(None, description="账号目录名")
+    db_key: Optional[str] = Field(None, description="数据库密钥，64位十六进制字符串")
+    image_xor_key: Optional[str] = Field(None, description="图片XOR密钥，如 0xA5")
+    image_aes_key: Optional[str] = Field(None, description="图片AES密钥，至少16个字符")
+    db_storage_path: Optional[str] = Field(None, description="微信 db_storage 路径")
+    wxid_dir: Optional[str] = Field(None, description="微信账号 wxid 目录")
 
 
 def _evaluate_db_key_candidate(
@@ -222,6 +287,74 @@ async def get_saved_keys(
         "status": "success",
         "account": account_name,
         "keys": result,
+    }
+
+
+@router.put("/api/keys", summary="保存账号密钥")
+async def save_saved_keys(request: SavedKeysSaveRequest):
+    """随时保存账号的数据库密钥与图片密钥。"""
+    account_name = _resolve_key_save_account(
+        account=request.account,
+        db_storage_path=request.db_storage_path,
+        wxid_dir=request.wxid_dir,
+    )
+    if not account_name:
+        raise HTTPException(status_code=400, detail="请先选择账号或提供 db_storage_path")
+
+    db_key = _validate_db_key(request.db_key) if request.db_key is not None else None
+    image_xor_key = _normalize_xor_key(request.image_xor_key) if request.image_xor_key is not None else None
+    image_aes_key = _normalize_aes_key(request.image_aes_key) if request.image_aes_key is not None else None
+
+    if db_key is None and image_xor_key is None and image_aes_key is None:
+        raise HTTPException(status_code=400, detail="请至少提供一个需要保存的密钥")
+
+    source_wxid_dir = _resolve_requested_wxid_dir(
+        db_storage_path=request.db_storage_path,
+        wxid_dir=request.wxid_dir,
+    )
+    source_db_storage_path = normalize_key_store_path(request.db_storage_path)
+    aliases = []
+    if source_wxid_dir:
+        wxid_name = str(Path(source_wxid_dir).name or "").strip()
+        if wxid_name and wxid_name != account_name:
+            aliases.append(wxid_name)
+
+    saved = upsert_account_keys_in_store(
+        account_name,
+        db_key=db_key,
+        image_xor_key=image_xor_key,
+        image_aes_key=image_aes_key,
+        aliases=aliases,
+        db_key_source_wxid_dir=source_wxid_dir or None,
+        db_key_source_db_storage_path=source_db_storage_path or None,
+    )
+
+    if image_xor_key is not None:
+        try:
+            account_dir = _resolve_account_dir(account_name)
+            xor_int = int(image_xor_key.lower().replace("0x", ""), 16)
+            aes_bytes = image_aes_key.encode("ascii", errors="ignore") if image_aes_key else None
+            _save_media_keys(account_dir, xor_int, aes_bytes)
+        except Exception:
+            logger.exception("[keys] save media key cache failed: account=%s", account_name)
+
+    logger.info(
+        "[keys] save_saved_keys done: account=%s db_key_present=%s image_xor_key=%s image_aes_key=%s aliases=%s",
+        account_name,
+        bool(db_key),
+        image_xor_key or "",
+        _summarize_aes_key(image_aes_key or ""),
+        aliases,
+    )
+    return {
+        "status": "success",
+        "account": account_name,
+        "keys": {
+            "db_key": str(saved.get("db_key") or ""),
+            "image_xor_key": str(saved.get("image_xor_key") or ""),
+            "image_aes_key": str(saved.get("image_aes_key") or ""),
+            "updated_at": str(saved.get("updated_at") or ""),
+        },
     }
 
 

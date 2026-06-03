@@ -1,11 +1,13 @@
 import asyncio
 import importlib
+import json
 import logging
 import os
 import sys
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from unittest import mock
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -95,6 +97,56 @@ class TestSavedDbKeySourceValidation(unittest.TestCase):
                 self.assertEqual(result["keys"]["db_key_source_wxid_dir"], str(db_storage.parent))
                 self.assertEqual(result["keys"]["db_key_source_db_storage_path"], str(db_storage))
                 self.assertEqual(result["keys"]["db_key_blocked_reason"], "")
+            finally:
+                _close_logging_handlers()
+                if prev_data_dir is None:
+                    os.environ.pop("WECHAT_TOOL_DATA_DIR", None)
+                else:
+                    os.environ["WECHAT_TOOL_DATA_DIR"] = prev_data_dir
+
+    def test_save_saved_keys_updates_db_and_image_keys(self) -> None:
+        with TemporaryDirectory() as td:
+            root = Path(td)
+            db_storage = root / "xwechat_files" / "wxid_demo_abcd" / "db_storage"
+            db_storage.mkdir(parents=True, exist_ok=True)
+            account_dir = root / "output" / "databases" / "wxid_demo_abcd"
+            account_dir.mkdir(parents=True, exist_ok=True)
+
+            prev_data_dir = os.environ.get("WECHAT_TOOL_DATA_DIR")
+            try:
+                os.environ["WECHAT_TOOL_DATA_DIR"] = str(root)
+
+                import wechat_decrypt_tool.app_paths as app_paths
+                import wechat_decrypt_tool.key_store as key_store
+                import wechat_decrypt_tool.routers.keys as keys_router
+
+                importlib.reload(app_paths)
+                importlib.reload(key_store)
+                importlib.reload(keys_router)
+
+                payload = keys_router.SavedKeysSaveRequest(
+                    account="wxid_demo_abcd",
+                    db_key="C" * 64,
+                    image_xor_key="A7",
+                    image_aes_key="1234567890abcdef-extra",
+                    db_storage_path=str(db_storage),
+                )
+                with mock.patch.object(keys_router, "_resolve_account_dir", return_value=account_dir):
+                    result = asyncio.run(keys_router.save_saved_keys(payload))
+
+                self.assertEqual(result["status"], "success")
+                self.assertEqual(result["account"], "wxid_demo_abcd")
+
+                saved = key_store.get_account_keys_from_store("wxid_demo_abcd")
+                self.assertEqual(saved["db_key"], "C" * 64)
+                self.assertEqual(saved["image_xor_key"], "0xA7")
+                self.assertEqual(saved["image_aes_key"], "1234567890abcdef")
+                self.assertEqual(saved["db_key_source_wxid_dir"], str(db_storage.parent))
+                self.assertEqual(saved["db_key_source_db_storage_path"], str(db_storage))
+
+                media_keys = json.loads((account_dir / "_media_keys.json").read_text(encoding="utf-8"))
+                self.assertEqual(media_keys["xor"], 0xA7)
+                self.assertEqual(media_keys["aes"], "1234567890abcdef")
             finally:
                 _close_logging_handlers()
                 if prev_data_dir is None:
