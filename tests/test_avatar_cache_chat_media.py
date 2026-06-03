@@ -1,3 +1,4 @@
+import logging
 import os
 import sqlite3
 import sys
@@ -12,6 +13,16 @@ sys.path.insert(0, str(ROOT / "src"))
 
 
 class TestAvatarCacheChatMedia(unittest.TestCase):
+    def _reset_logging(self) -> None:
+        logging.shutdown()
+        try:
+            import wechat_decrypt_tool.logging_config as logging_config
+
+            logging_config.WeChatLogger._initialized = False
+            logging_config.WeChatLogger._instance = None
+        except Exception:
+            pass
+
     def _seed_contact_db(self, path: Path, *, username: str = "wxid_friend") -> None:
         conn = sqlite3.connect(str(path))
         try:
@@ -120,11 +131,14 @@ class TestAvatarCacheChatMedia(unittest.TestCase):
                 os.environ["WECHAT_TOOL_AVATAR_CACHE_ENABLED"] = "1"
 
                 import wechat_decrypt_tool.app_paths as app_paths
+                import wechat_decrypt_tool.logging_config as logging_config
                 import wechat_decrypt_tool.chat_helpers as chat_helpers
                 import wechat_decrypt_tool.avatar_cache as avatar_cache
                 import wechat_decrypt_tool.routers.chat_media as chat_media
 
+                self._reset_logging()
                 importlib.reload(app_paths)
+                importlib.reload(logging_config)
                 importlib.reload(chat_helpers)
                 importlib.reload(avatar_cache)
                 importlib.reload(chat_media)
@@ -158,6 +172,77 @@ class TestAvatarCacheChatMedia(unittest.TestCase):
                 self.assertEqual(resp2.status_code, 200)
                 self.assertEqual(resp2.content, resp.content)
             finally:
+                self._reset_logging()
+                if prev_data is None:
+                    os.environ.pop("WECHAT_TOOL_DATA_DIR", None)
+                else:
+                    os.environ["WECHAT_TOOL_DATA_DIR"] = prev_data
+                if prev_cache is None:
+                    os.environ.pop("WECHAT_TOOL_AVATAR_CACHE_ENABLED", None)
+                else:
+                    os.environ["WECHAT_TOOL_AVATAR_CACHE_ENABLED"] = prev_cache
+
+    def test_chat_avatar_resolves_self_account_numeric_suffix_alias(self):
+        from fastapi import FastAPI
+        from fastapi.testclient import TestClient
+
+        with TemporaryDirectory() as td:
+            root = Path(td)
+            account = "yaopfei_9315"
+            stored_username = "yaopfei"
+            account_dir = root / "output" / "databases" / account
+            account_dir.mkdir(parents=True, exist_ok=True)
+
+            self._seed_contact_db(account_dir / "contact.db", username=stored_username)
+            self._seed_session_db(account_dir / "session.db", username=stored_username)
+            self._seed_head_image_db(account_dir / "head_image.db", username=stored_username)
+
+            prev_data = None
+            prev_cache = None
+            try:
+                prev_data = os.environ.get("WECHAT_TOOL_DATA_DIR")
+                prev_cache = os.environ.get("WECHAT_TOOL_AVATAR_CACHE_ENABLED")
+                os.environ["WECHAT_TOOL_DATA_DIR"] = str(root)
+                os.environ["WECHAT_TOOL_AVATAR_CACHE_ENABLED"] = "1"
+
+                import wechat_decrypt_tool.app_paths as app_paths
+                import wechat_decrypt_tool.logging_config as logging_config
+                import wechat_decrypt_tool.chat_helpers as chat_helpers
+                import wechat_decrypt_tool.avatar_cache as avatar_cache
+                import wechat_decrypt_tool.routers.chat_media as chat_media
+
+                self._reset_logging()
+                importlib.reload(app_paths)
+                importlib.reload(logging_config)
+                importlib.reload(chat_helpers)
+                importlib.reload(avatar_cache)
+                importlib.reload(chat_media)
+
+                app = FastAPI()
+                app.include_router(chat_media.router)
+                client = TestClient(app)
+
+                resp = client.get("/api/chat/avatar", params={"account": account, "username": account})
+                self.assertEqual(resp.status_code, 200)
+                self.assertTrue(resp.headers.get("content-type", "").startswith("image/"))
+
+                cache_db = root / "output" / "avatar_cache" / account / "avatar_cache.db"
+                self.assertTrue(cache_db.exists())
+
+                conn = sqlite3.connect(str(cache_db))
+                try:
+                    rows = conn.execute(
+                        "SELECT username, rel_path FROM avatar_cache_entries WHERE source_kind = 'user'"
+                    ).fetchall()
+                finally:
+                    conn.close()
+
+                by_username = {str(row[0] or ""): str(row[1] or "") for row in rows}
+                self.assertIn(account, by_username)
+                self.assertIn(stored_username, by_username)
+                self.assertEqual(by_username[account], by_username[stored_username])
+            finally:
+                self._reset_logging()
                 if prev_data is None:
                     os.environ.pop("WECHAT_TOOL_DATA_DIR", None)
                 else:

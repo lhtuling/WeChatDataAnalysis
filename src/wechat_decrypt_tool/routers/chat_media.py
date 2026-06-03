@@ -435,6 +435,31 @@ def _resolve_avatar_remote_url(*, account_dir: Path, username: str) -> str:
     return ""
 
 
+def _avatar_username_candidates(*, account_name: str, username: str) -> list[str]:
+    user = str(username or "").strip()
+    account = str(account_name or "").strip()
+    candidates: list[str] = []
+    seen: set[str] = set()
+
+    def add(value: str) -> None:
+        v = str(value or "").strip()
+        if v and v not in seen:
+            seen.add(v)
+            candidates.append(v)
+
+    add(user)
+    if user and account and user == account:
+        suffixed = re.fullmatch(r"(.+)_\d+", user)
+        if suffixed:
+            add(suffixed.group(1))
+        if user.startswith("wxid_"):
+            parts = user.split("_")
+            if len(parts) > 2:
+                add("_".join(parts[:-1]))
+
+    return candidates
+
+
 def _parse_304_headers(headers: Any) -> tuple[str, str]:
     try:
         etag = str((headers or {}).get("ETag") or "").strip()
@@ -665,6 +690,7 @@ async def get_chat_avatar(username: str, account: Optional[str] = None):
     account_dir = _resolve_account_dir(account)
     account_name = str(account_dir.name or "").strip()
     user_key = str(username or "").strip()
+    user_candidates = _avatar_username_candidates(account_name=account_name, username=user_key)
     _trace_id, trace = create_perf_trace(
         logger,
         "chat.avatar",
@@ -707,11 +733,22 @@ async def get_chat_avatar(username: str, account: Optional[str] = None):
 
     conn = sqlite3.connect(str(head_image_db_path))
     try:
-        meta = conn.execute(
-            "SELECT md5, update_time FROM head_image WHERE username = ? ORDER BY update_time DESC LIMIT 1",
-            (username,),
-        ).fetchone()
-        trace("head-image:meta", hasMeta=bool(meta and meta[0] is not None))
+        meta = None
+        resolved_user_key = user_key
+        for candidate in user_candidates:
+            meta = conn.execute(
+                "SELECT md5, update_time FROM head_image WHERE username = ? ORDER BY update_time DESC LIMIT 1",
+                (candidate,),
+            ).fetchone()
+            if meta and meta[0] is not None:
+                resolved_user_key = candidate
+                break
+        trace(
+            "head-image:meta",
+            hasMeta=bool(meta and meta[0] is not None),
+            candidateCount=len(user_candidates),
+            resolvedUsername=resolved_user_key,
+        )
         if meta and meta[0] is not None:
             db_md5 = str(meta[0] or "").strip().lower()
             try:
@@ -743,7 +780,7 @@ async def get_chat_avatar(username: str, account: Optional[str] = None):
             # Refresh from blob (changed or first-load)
             row = conn.execute(
                 "SELECT image_buffer FROM head_image WHERE username = ? ORDER BY update_time DESC LIMIT 1",
-                (username,),
+                (resolved_user_key,),
             ).fetchone()
             if row and row[0] is not None:
                 data = bytes(row[0]) if isinstance(row[0], (memoryview, bytearray)) else row[0]
@@ -756,7 +793,7 @@ async def get_chat_avatar(username: str, account: Optional[str] = None):
                     entry, out_path = write_avatar_cache_payload(
                         account_name,
                         source_kind="user",
-                        username=user_key,
+                        username=resolved_user_key,
                         payload=bytes(data),
                         media_type=media_type,
                         source_md5=db_md5,
@@ -764,8 +801,29 @@ async def get_chat_avatar(username: str, account: Optional[str] = None):
                         ttl_seconds=AVATAR_CACHE_TTL_SECONDS,
                     )
                     if entry and out_path:
+                        if resolved_user_key != user_key:
+                            try:
+                                upsert_avatar_cache_entry(
+                                    account_name,
+                                    cache_key=cache_key_for_avatar_user(user_key),
+                                    source_kind="user",
+                                    username=user_key,
+                                    source_url=str(entry.get("source_url") or ""),
+                                    source_md5=str(entry.get("source_md5") or ""),
+                                    source_update_time=int(entry.get("source_update_time") or 0),
+                                    rel_path=str(entry.get("rel_path") or ""),
+                                    media_type=str(entry.get("media_type") or "application/octet-stream"),
+                                    size_bytes=int(entry.get("size_bytes") or 0),
+                                    etag=str(entry.get("etag") or ""),
+                                    last_modified=str(entry.get("last_modified") or ""),
+                                    fetched_at=int(entry.get("fetched_at") or 0),
+                                    checked_at=int(entry.get("checked_at") or 0),
+                                    expires_at=int(entry.get("expires_at") or 0),
+                                )
+                            except Exception:
+                                pass
                         logger.info(
-                            f"[avatar_cache_download] kind=user account={account_name} username={user_key} src=head_image"
+                            f"[avatar_cache_download] kind=user account={account_name} username={user_key} resolved={resolved_user_key} src=head_image"
                         )
                         headers = build_avatar_cache_response_headers(entry)
                         trace("response:ready", result="head-image-blob-cache-write", mediaType=media_type, bytes=len(data))
@@ -784,8 +842,14 @@ async def get_chat_avatar(username: str, account: Optional[str] = None):
         conn.close()
 
     # 2) Fallback: remote avatar URL (contact/WCDB), cache by URL.
-    remote_url = _resolve_avatar_remote_url(account_dir=account_dir, username=user_key)
-    trace("remote-url:resolved", hasRemoteUrl=bool(remote_url))
+    remote_url = ""
+    remote_user_key = user_key
+    for candidate in user_candidates:
+        remote_url = _resolve_avatar_remote_url(account_dir=account_dir, username=candidate)
+        if remote_url:
+            remote_user_key = candidate
+            break
+    trace("remote-url:resolved", hasRemoteUrl=bool(remote_url), resolvedUsername=remote_user_key)
     if remote_url and is_avatar_cache_enabled():
         url_entry = get_avatar_cache_url_entry(account_name, remote_url)
         url_file = avatar_cache_entry_file_exists(account_name, url_entry)
